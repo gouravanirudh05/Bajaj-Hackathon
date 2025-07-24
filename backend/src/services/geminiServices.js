@@ -1,72 +1,57 @@
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 import dotenv from 'dotenv';
 import { searchKnowledge } from '../scripts/queryKnowledge.js';
-
 dotenv.config();
-
 export const chatWithAI = async (history, message, systemInstruction) => {
   if (!process.env.GOOGLE_AI_API_KEY) {
     throw new Error('Missing GOOGLE_AI_API_KEY in environment variables');
   }
-
   const pineconeResults = await searchKnowledge(message, 3);
-  let additionalContext = '';
-
+  let contextText = '';
   if (pineconeResults.length > 0) {
-    additionalContext = `\n\nRelevant Information:\n${pineconeResults
+    contextText = `You must answer using the following internal insurance knowledge:\n\n${pineconeResults
       .map((r) => `- ${r.text}`)
-      .join('\n')}`;
+      .join('\n')}\n\nIf it doesn't help, fall back to general knowledge.`;
   } else {
-    additionalContext =
-      'No relevant knowledge found in Pinecone. You are a highly intelligent AI assistant. If relevant information is found in the user\'s internal database, include it in your response. However, if no relevant information is found, use your general knowledge to answer the question accurately and in detail.\n';
+    contextText = `No relevant internal knowledge was found.\nUse your general knowledge to help the user as best as possible.`;
   }
-
-  const fullSystemInstruction = process.env.AI_INSTRUCTIONS || '';
+  const fullSystemInstruction =
+    systemInstruction || process.env.AI_INSTRUCTIONS || 'You are an expert insurance assistant. Be accurate and detailed.';
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash-lite',
     systemInstruction: fullSystemInstruction,
   });
-
   const generationConfig = {
     temperature: 1,
     topP: 0.95,
     topK: 64,
     maxOutputTokens: 8192,
   };
-
   const safetySettings = [
-    {
-      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-      threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   ];
-
-  history.push({ role: 'user', parts: [{ text: message }] });
-  history.push({ role: 'user', parts: [{ text: additionalContext }] });
-
+  const chatHistory = history.map((m) => ({
+    role: m.role,
+    parts: m.parts,
+  }));
+  const combinedPrompt = `${contextText}\n\nUser question: ${message}`;
+console.log("🔍 Pinecone Context:\n", contextText);
+  chatHistory.push({
+    role: 'user',
+    parts: [{ text: combinedPrompt }],
+  });
   const chatSession = model.startChat({
     generationConfig,
     safetySettings,
-    history: history,
+    history: chatHistory,
   });
-
-  const result = await chatSession.sendMessage(message);
+  const result = await chatSession.sendMessage(combinedPrompt);
   if (!result.response || !result.response.text) {
     throw new Error('Failed to get text response from the AI.');
   }
-
   return result.response.text();
 };

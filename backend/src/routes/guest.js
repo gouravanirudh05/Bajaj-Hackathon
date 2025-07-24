@@ -1,7 +1,8 @@
 import express from 'express';
 import GuestConversation from '../models/GuestConversation.js';
-import { chatWithAI } from '../services/geminiService.js';
+import { chatWithAI } from '../services/geminiServices.js';
 import { v4 as uuidv4 } from 'uuid';
+import { searchKnowledge } from '../scripts/queryKnowledge.js';
 
 const router = express.Router();
 
@@ -18,17 +19,10 @@ router.post('/', async (req, res) => {
       guestConversation = await GuestConversation.findOne({ guestId });
     }
 
-    if (!guestId) {
-      const newGuestId = uuidv4();
+    if (!guestId || !guestConversation) {
+      const newId = guestId || uuidv4();
       const newGuestConv = new GuestConversation({
-        guestId: newGuestId,
-        messages: [],
-      });
-      await newGuestConv.save();
-      return handleGuestConversation(res, newGuestConv, message);
-    } else if (!guestConversation && guestId) {
-      const newGuestConv = new GuestConversation({
-        guestId,
+        guestId: newId,
         messages: [],
       });
       await newGuestConv.save();
@@ -43,33 +37,41 @@ router.post('/', async (req, res) => {
 });
 
 async function handleGuestConversation(res, guestConv, userMessage) {
-  const history = guestConv.messages.map((m) => ({
-    role: m.sender === 'user' ? 'user' : 'model',
-    parts: [{ text: m.text }],
-  }));
+  try {
+    // 1. Retrieve similar info from Pinecone
+    const pineconeResults = await searchKnowledge(userMessage, 3);
+    const contextText = pineconeResults.map(r => `- ${r.text}`).join('\n');
 
-  history.push({ role: 'user', parts: [{ text: userMessage }] });
+    // 2. Create system prompt
+    const promptWithContext = contextText
+      ? `Use the following insurance knowledge to assist:\n\n${contextText}\n\nUser question: ${userMessage}`
+      : `No internal knowledge found. Use general knowledge.\n\nUser question: ${userMessage}`;
 
-  const aiResponse = await chatWithAI(history, userMessage);
+    // 3. Prepare chat history
+    const history = guestConv.messages.map((m) => ({
+      role: m.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text }],
+    }));
 
-  guestConv.messages.push({
-    sender: 'user',
-    text: userMessage,
-    timestamp: new Date(),
-  });
+    // 4. Get AI reply
+    const aiResponse = await chatWithAI(history, userMessage);
 
-  guestConv.messages.push({
-    sender: 'model',
-    text: aiResponse,
-    timestamp: new Date(),
-  });
+    // 5. Save conversation
+    guestConv.messages.push(
+      { sender: 'user', text: userMessage, timestamp: new Date() },
+      { sender: 'model', text: aiResponse, timestamp: new Date() }
+    );
+    await guestConv.save();
 
-  await guestConv.save();
+    return res.json({
+      answer: aiResponse,
+      guestId: guestConv.guestId,
+    });
 
-  return res.json({
-    answer: aiResponse,
-    guestId: guestConv.guestId,
-  });
+  } catch (error) {
+    console.error("Error in handleGuestConversation:", error.message);
+    return res.status(500).json({ message: "Failed to process request." });
+  }
 }
 
 export default router;

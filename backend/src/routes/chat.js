@@ -1,7 +1,7 @@
 import express from 'express'
 import jwt from 'jsonwebtoken'
-import Conversation from '../models/Conversation'
-import { chatWithAI } from '../services/geminiServices'
+import Conversation from '../models/Conversation.js'
+import { chatWithAI } from '../services/geminiServices.js'
 const router=express.Router()
 router.post('/',async(req,res)=>
 {

@@ -1,6 +1,6 @@
-import express,{Request,Response}from "express";
-import User from "..models/User";
-import bcrypt from 'bcrypt.js'
+import express from "express";
+import User from "../models/User.js";
+import bcrypt from 'bcrypt'
 import jwt  from 'jsonwebtoken'
 import dotenv from 'dotenv'
 dotenv.config()
@@ -55,7 +55,7 @@ router.get("/verify-email",async (req,res)=>{
     const {email}=req.body;
     if(!email)
         return res.status(400).json({message:"Email is required"});
-    const user= User.findOne({email});
+    const user= await User.findOne({email});
     res.json({exists:!!user});
     }
     catch(e)
@@ -63,13 +63,13 @@ router.get("/verify-email",async (req,res)=>{
         return res.status(500).json({message:e.message});
     }
 })
-router.post('/reset-passoword',async (req,res)=>
+router.post('/reset-password',async (req,res)=>
 {
     try{
         const {email,newpassword}=req.body;
         if(!email || !newpassword)
             return res.status(500).json({message:"Email and new password are required"});
-        const user= await User.findOne(email);
+        const user= await User.findOne({email});
         if(!user)
             return res.status(400).json({message:"User does not exist"});
         const hashed= await bcrypt.hash(newpassword,10);

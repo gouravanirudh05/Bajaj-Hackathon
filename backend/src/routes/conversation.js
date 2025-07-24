@@ -1,6 +1,6 @@
-import express,{Request,Response} from "express";
-import { authenticateJWT,AuthRequest} from "../middleware/auth";
-import Conversation from "../models/Conversation";
+import express from "express";
+import { authenticateJWT} from "../middleware/auth.js";
+import Conversation from "../models/Conversation.js";
 const router=express.Router();
 
 router.post('/',authenticateJWT,async (req,res)=>{
@@ -28,7 +28,7 @@ router.get('/',authenticateJWT,async (req,res)=>{
         res.status(500).json({message:error.message});
     }
 });
-router.get('/:id',AuthRequest,async (req,res)=>{
+router.get('/:id',authenticateJWT,async (req,res)=>{
   try {
     const userId=req.user.id;
     const conversation= await Conversation.findOne({_id:req.params.id,user:userId});
